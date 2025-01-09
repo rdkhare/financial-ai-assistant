@@ -1,12 +1,22 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 export default function Home() {
-  return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gray-100">
-          <h1 className="text-4xl font-bold text-blue-500">
-              Welcome to the Financial Assistant AI
-          </h1>
-          <p className="text-lg text-gray-700">
-              This is the frontend built with Next.js and Tailwind CSS!
-          </p>
-      </div>
-  );
+    const [message, setMessage] = useState("");
+
+    useEffect(() => {
+        fetch("http://127.0.0.1:5001/")
+            .then((response) => response.json())
+            .then((data) => setMessage(data.message))
+            .catch((error) => console.error("Error fetching data:", error));
+    }, []);
+
+    return (
+        <div className="flex flex-col items-center justify-center h-screen">
+            <h1 className="text-4xl font-bold text-gray-100">
+                Welcome to the Financial Assistant AI
+            </h1>
+        </div>
+    );
 }

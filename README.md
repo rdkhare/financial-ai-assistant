@@ -69,3 +69,7 @@ This project contains both a frontend (Next.js) and a backend (Flask). Follow th
     TELLER_CLIENT_KEY = "path/to/your/teller/privatekey"
     MONGO_URI = "mongodb_connectionstring"
     ```
+- Create a .env.local file in frontend/ with variable:
+    ```bash
+    NEXT_PUBLIC_TELLER_APP_ID="tellerappid"
+    ```

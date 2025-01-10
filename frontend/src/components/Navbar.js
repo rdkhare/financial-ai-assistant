@@ -37,7 +37,7 @@ export default function Navbar({children}) {
         <div className="flex h-screen">
             {/* Sidebar */}
             <nav
-                className={`bg-gray-900 text-white h-full ${
+                className={`text-white h-full ${
                     isExpanded ? "w-64" : "w-20"
                 } transition-all duration-300 ease-in-out flex flex-col`}
             >

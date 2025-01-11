@@ -36,11 +36,11 @@ export default function Account() {
         }
     };
 
-    const syncBalances = async () => {
+    const syncBalancesAndTransactions = async () => {
         if (user) {
             setIsSyncing(true);
             try {
-                const response = await fetch("http://127.0.0.1:5001/sync-balances", {
+                const response = await fetch("http://127.0.0.1:5001/sync-balances-and-transactions", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ user_id: user.uid }),
@@ -50,7 +50,7 @@ export default function Account() {
                 if (response.ok) {
                     setAccounts(data.accounts || []);
                 } else {
-                    setError(data.error || "Failed to sync balances");
+                    setError(data.error || "Failed to sync balances and transactions");
                 }
             } catch (err) {
                 setError(err.message);
@@ -135,14 +135,14 @@ export default function Account() {
                     <h2 className="text-2xl font-semibold">Connected Accounts</h2>
                     {/* Sync Button */}
                     <button
-                        onClick={syncBalances}
+                        onClick={syncBalancesAndTransactions}
                         className={`p-2 rounded-full ${
                             isSyncing
                                 ? "text-gray-400 animate-spin"
                                 : "text-green-400 hover:text-green-500 transition-colors"
                         }`}
                         disabled={isSyncing}
-                        aria-label="Sync Balances"
+                        aria-label="Sync Balances and Transactions"
                     >
                         <FaSync className="w-6 h-6" />
                     </button>
@@ -180,7 +180,7 @@ export default function Account() {
             </div>
 
             {/* Teller Connect Button */}
-            <button
+            {user &&<button
                 onClick={handleTellerConnect}
                 className={`mt-8 border-2 border-black bg-black text-white p-3 rounded-md hover:bg-white hover:shadow-lg transition-transform hover:text-black ${
                     isConnecting ? "opacity-50 cursor-not-allowed" : ""
@@ -188,7 +188,7 @@ export default function Account() {
                 disabled={isConnecting}
             >
                 {isConnecting ? "Connecting..." : "Connect Bank Account"}
-            </button>
+            </button>}
         </div>
     );
 }

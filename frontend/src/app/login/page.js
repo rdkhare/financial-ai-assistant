@@ -16,7 +16,7 @@ export default function Login() {
         try {
             const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
             setMessage(`Welcome back, ${userCredential.user.email}!`);
-            router.push("/dashboard"); // Redirect to dashboard
+            router.push("/account"); // Redirect to dashboard
         } catch (error) {
             setMessage(`Error: ${error.message}`);
         }
@@ -26,7 +26,7 @@ export default function Login() {
         try {
             const result = await signInWithPopup(auth, googleProvider);
             setMessage(`Welcome back, ${result.user.displayName || result.user.email}!`);
-            router.push("/dashboard"); // Redirect to dashboard
+            router.push("/account"); // Redirect to dashboard
         } catch (error) {
             setMessage(`Error: ${error.message}`);
         }

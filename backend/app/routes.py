@@ -5,6 +5,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 from urllib3.util.retry import Retry
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 routes_bp = Blueprint("routes", __name__)
 
@@ -50,18 +51,6 @@ def get_accounts():
         return jsonify(accounts)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@routes_bp.route("/transactions", methods=["POST"])
-def get_transactions():
-    access_token = request.json.get("access_token")
-    account_id = request.json.get("account_id")
-    if not access_token or not account_id:
-        return jsonify({"error": "Access token and account ID are required"}), 400
-    try:
-        transactions = fetch_transactions(access_token, account_id)
-        return jsonify(transactions)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
     
 @routes_bp.route("/store-access-token", methods=["POST"])
 def store_access_token():
@@ -84,7 +73,7 @@ def store_access_token():
 def get_connected_accounts():
     """
     Retrieves connected accounts for a user from the MongoDB database.
-    If accounts are not found, fetches them from the Teller API, retrieves balances,
+    If accounts are not found, fetches them from the Teller API, retrieves balances and transactions in parallel,
     and stores them in the database.
     """
     try:
@@ -120,8 +109,8 @@ def get_connected_accounts():
             accounts_data = response.json()
             accounts = []
 
-            # Fetch balances for each account
-            for account in accounts_data:
+            # Function to fetch balance and transactions for an account
+            def fetch_balance_and_transactions(account):
                 account_info = {
                     "accountName": account.get("name"),
                     "bankName": account.get("institution", {}).get("name"),
@@ -134,13 +123,15 @@ def get_connected_accounts():
                     "enrollment_id": account.get("enrollment_id"),
                     "teller_id": account.get("id"),
                     "linkedAt": None,
-                    "balance": None
+                    "balance": None,
+                    "transactions": None
                 }
 
-                # Fetch the balance using the balance link
                 balance_link = account.get("links", {}).get("balances")
-                if balance_link:
-                    try:
+                transaction_link = account.get("links", {}).get("transactions")
+
+                try:
+                    if balance_link:
                         balance_response = session.get(
                             balance_link,
                             auth=(access_token, ""),
@@ -149,13 +140,42 @@ def get_connected_accounts():
                         )
                         if balance_response.status_code == 200:
                             balance_data = balance_response.json()
-                            account_info["balance"] = balance_data.get("available")  # Use "available" or "current"
+                            account_info["balance"] = balance_data.get("available")
                         else:
                             account_info["balance"] = "Error fetching balance"
-                    except RequestException as balance_error:
-                        account_info["balance"] = f"Error: {str(balance_error)}"
+                except RequestException as e:
+                    account_info["balance"] = f"Error: {str(e)}"
 
-                accounts.append(account_info)
+                try:
+                    if transaction_link:
+                        transaction_response = session.get(
+                            transaction_link,
+                            auth=(access_token, ""),
+                            cert=("certs/certificate.pem", "certs/private_key.pem"),
+                            timeout=10
+                        )
+                        if transaction_response.status_code == 200:
+                            transaction_data = transaction_response.json()
+                            account_info["transactions"] = transaction_data
+                        else:
+                            account_info["transactions"] = "Error fetching transactions"
+                except RequestException as e:
+                    account_info["transactions"] = f"Error: {str(e)}"
+
+                return account_info
+
+            # Use ThreadPoolExecutor to fetch balances and transactions concurrently
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                future_to_account = {
+                    executor.submit(fetch_balance_and_transactions, account): account
+                    for account in accounts_data
+                }
+                for future in as_completed(future_to_account):
+                    try:
+                        account_info = future.result()
+                        accounts.append(account_info)
+                    except Exception as e:
+                        accounts.append({"error": str(e)})
 
             # Store accounts in the database
             bank_accounts_collection.update_one(
@@ -173,10 +193,10 @@ def get_connected_accounts():
 
 
 
-@routes_bp.route("/sync-balances", methods=["POST"])
-def sync_balances():
+@routes_bp.route("/sync-balances-and-transactions", methods=["POST"])
+def sync_balances_and_transactions():
     """
-    Syncs the balances of connected accounts for a user by fetching updated data from the Teller API.
+    Syncs the balances and transactions of connected accounts for a user by fetching updated data from the Teller API.
     Triggered by the sync button on the frontend.
     """
     try:
@@ -199,34 +219,66 @@ def sync_balances():
 
         accounts = stored_accounts["accounts"]
 
-        # Sync balances for each account
-        with get_session_with_retries() as session:
-            for account in accounts:
-                balance_link = account.get("links", {}).get("balances")
+        # Function to fetch balance and transactions for an account
+        def fetch_account_data(account):
+            balance_link = account.get("links", {}).get("balances")
+            transaction_link = account.get("links", {}).get("transactions")
+            
+            try:
                 if balance_link:
-                    try:
-                        response = session.get(
-                            balance_link,
-                            auth=(access_token, ""),
-                            cert=("certs/certificate.pem", "certs/private_key.pem"),
-                            timeout=10
-                        )
-                        if response.status_code == 200:
-                            balance_data = response.json()
-                            account["balance"] = balance_data.get("available")  # Use "available" or "current"
-                        else:
-                            account["balance"] = "Error fetching balance"
-                    except RequestException as balance_error:
-                        account["balance"] = f"Error: {str(balance_error)}"
+                    balance_response = session.get(
+                        balance_link,
+                        auth=(access_token, ""),
+                        cert=("certs/certificate.pem", "certs/private_key.pem"),
+                        timeout=10
+                    )
+                    if balance_response.status_code == 200:
+                        balance_data = balance_response.json()
+                        account["balance"] = balance_data.get("available")
+                    else:
+                        account["balance"] = "Error fetching balance"
+            except RequestException as e:
+                account["balance"] = f"Error: {str(e)}"
 
-            # Update the database with the refreshed balances
-            bank_accounts_collection.update_one(
-                {"userId": user_id},
-                {"$set": {"accounts": accounts}},
-                upsert=True
-            )
+            try:
+                if transaction_link:
+                    transaction_response = session.get(
+                        transaction_link,
+                        auth=(access_token, ""),
+                        cert=("certs/certificate.pem", "certs/private_key.pem"),
+                        timeout=10
+                    )
+                    if transaction_response.status_code == 200:
+                        transaction_data = transaction_response.json()
+                        account["transactions"] = transaction_data
+                    else:
+                        account["transactions"] = "Error fetching transactions"
+            except RequestException as e:
+                account["transactions"] = f"Error: {str(e)}"
 
-        return jsonify({"message": "Balances synced successfully", "accounts": accounts}), 200
+            return account
+
+        # Use ThreadPoolExecutor to sync balances and transactions concurrently
+        with get_session_with_retries() as session, ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_account = {
+                executor.submit(fetch_account_data, account): account
+                for account in accounts
+            }
+            updated_accounts = []
+            for future in as_completed(future_to_account):
+                try:
+                    updated_accounts.append(future.result())
+                except Exception as e:
+                    updated_accounts.append({"error": str(e)})
+
+        # Update the database with the refreshed balances and transactions
+        bank_accounts_collection.update_one(
+            {"userId": user_id},
+            {"$set": {"accounts": updated_accounts}},
+            upsert=True
+        )
+
+        return jsonify({"message": "Balances & transactions synced successfully", "accounts": updated_accounts}), 200
 
     except RequestException as re:
         return jsonify({"error": f"Request failed: {str(re)}"}), 500

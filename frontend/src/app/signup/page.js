@@ -35,7 +35,7 @@ export default function Signup() {
 
             if (response.ok) {
                 setMessage("Account created successfully! Redirecting...");
-                router.push("/"); // Redirect to homepage (dashboard later)
+                router.push("/account"); // Redirect to account (dashboard later)
             } else {
                 setMessage(`Error: ${data.message}`);
             }
@@ -67,7 +67,7 @@ export default function Signup() {
 
             if (response.ok) {
                 setMessage("Account created successfully! Redirecting...");
-                router.push("/"); // Redirect to home
+                router.push("/account"); // Redirect to account
             } else {
                 setMessage(`Error: ${data.message}`);
             }

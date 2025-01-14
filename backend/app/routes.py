@@ -6,7 +6,7 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 from urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.helpers.transaction_helpers import parse_transactions_categories
+from app.helpers.transaction_helpers import parse_transactions_categories, calculate_balance_over_time
 
 routes_bp = Blueprint("routes", __name__)
 
@@ -188,7 +188,22 @@ def get_connected_accounts():
                         account["transactionsPerCategory"] = {"error": f"Parsing error: {str(e)}"}
                 else:
                     account["transactionsPerCategory"] = {"error": "Invalid transaction data"}
+            
+            # Parse transactions over time for each account after fetching all data
+            for account in accounts:
+                if account.get("accountType") == "depository":
 
+                    transactions = account.get("transactions", [])
+                    if isinstance(transactions, list):
+                        try:
+                            # Calculate transactions over time
+                            account["balanceOverTime"] = calculate_balance_over_time(transactions, None, None)
+                        except Exception as e:
+                            account["balanceOverTime"] = {"error": f"Error calculating balance over time: {str(e)}"}
+
+
+
+            
             # Store accounts in the database
             bank_accounts_collection.update_one(
                 {"userId": user_id},
@@ -284,7 +299,7 @@ def sync_balances_and_transactions():
                 except Exception as e:
                     updated_accounts.append({"error": str(e)})
 
-        # Parse transactions for each account after fetching all data
+        # Parse transactions per category for each account after fetching all data
         for account in updated_accounts:
             transactions = account.get("transactions", [])
             if isinstance(transactions, list):
@@ -292,6 +307,19 @@ def sync_balances_and_transactions():
                     account["transactionsPerCategory"] = parse_transactions_categories(transactions)
                 except Exception as e:
                     account["transactionsPerCategory"] = {"error": f"Parsing error: {str(e)}"}
+
+        # Parse transactions over time for each account after fetching all data
+        for account in updated_accounts:
+            if account.get("accountType") == "depository":
+
+                transactions = account.get("transactions", [])
+                if isinstance(transactions, list):
+                    try:
+                        # Calculate transactions over time
+                        account["balanceOverTime"] = calculate_balance_over_time(transactions, None, None)
+                    except Exception as e:
+                        account["balanceOverTime"] = {"error": f"Error calculating balance over time: {str(e)}"}
+
 
         # Update the database with the refreshed balances and transactions
         bank_accounts_collection.update_one(
@@ -325,3 +353,27 @@ def get_transactions_per_category():
             transactions_per_category[category] = transactions_per_category.get(category, 0) + count
 
     return jsonify({"transactionsPerCategory": transactions_per_category}), 200
+
+@routes_bp.route("/get-balance-over-time", methods=["POST"])
+def get_balance_over_time():
+    data = request.json
+    user_id = data.get("user_id")
+    start_date = data.get("start_date")  
+    end_date = data.get("end_date")     
+
+    if not user_id:
+        return jsonify({"error": "User ID is required"}), 400
+
+    stored_accounts = bank_accounts_collection.find_one({"userId": user_id})
+    if not stored_accounts:
+        return jsonify({"error": "No accounts found for this user"}), 404
+
+    # Aggregate all transactions for the user
+    all_transactions = []
+    for account in stored_accounts.get("accounts", []):
+        all_transactions.extend(account.get("transactions", []))
+
+    # Calculate balance over time with date filtering
+    balance_over_time = calculate_balance_over_time(all_transactions, start_date, end_date)
+
+    return jsonify({"balanceOverTime": balance_over_time}), 200

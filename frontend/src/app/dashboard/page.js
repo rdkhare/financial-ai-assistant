@@ -1,35 +1,61 @@
-"use client";
+"use client"
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { useAuth } from "../../context/AuthContext";
-import { fetchTransactions } from "../../lib/api"; // Import API helper
-
 
 export default function Dashboard() {
-    const { user } = useAuth();
-    const router = useRouter();
+    const [categoryData, setCategoryData] = useState([]);
+    const { user } = useAuth(); // Access the logged-in user
+    const [isLoading, setIsLoading] = useState(false); // State for loading icon
     const [error, setError] = useState(null);
 
-    // Redirect if not logged in
-    useEffect(() => {
-        if (!user) {
-            router.push("/"); // Redirect to home if not logged in
-            return;
+    const fetchTransactionsPerCat = async () => {
+        if (user) {
+            setIsLoading(true); // Show loading icon
+            try {
+                // Pass the user ID as a query parameter
+                const response = await fetch(`http://127.0.0.1:5001/get-transactions-per-category?user_id=${user.uid}`, {
+                    method: "GET",
+                    headers: { "Content-Type": "application/json" },
+                });
+    
+                if (!response.ok) {
+                    throw new Error("Failed to fetch transactions per category");
+                }
+    
+                const data = await response.json();
+                const formattedData = Object.entries(data.transactionsPerCategory).map(([category, count]) => ({
+                    category,
+                    count,
+                }));
+                setCategoryData(formattedData);
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                setIsLoading(false); // Hide loading icon
+            }
         }
+    };
+    
 
-    }, [user, router]);
+    useEffect(() => {
 
+        fetchTransactionsPerCat();
+    }, [user]);
 
     return (
-        <div className="p-4">
-            {/* Welcome message */}
-            <h1 className="text-3xl font-bold mb-4 text-white">Welcome, {user?.displayName || "User"}</h1>
-
-            {/* Error Message */}
-            {error && <p className="text-red-500 mb-4">Error: {error}</p>}
-
-            
+        <div>
+            <h2>Transactions Per Category</h2>
+            <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={categoryData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="category" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#8884d8" />
+                </BarChart>
+            </ResponsiveContainer>
         </div>
     );
 }

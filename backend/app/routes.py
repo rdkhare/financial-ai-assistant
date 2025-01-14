@@ -6,6 +6,7 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 from urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from app.helpers.transaction_helpers import parse_transactions_categories
 
 routes_bp = Blueprint("routes", __name__)
 
@@ -177,6 +178,17 @@ def get_connected_accounts():
                     except Exception as e:
                         accounts.append({"error": str(e)})
 
+            # Parse transactions categories after fetching all accounts and transactions
+            for account in accounts:
+                transactions = account.get("transactions", [])
+                if isinstance(transactions, list):  # Ensure valid transaction data before parsing
+                    try:
+                        account["transactionsPerCategory"] = parse_transactions_categories(transactions)
+                    except Exception as e:
+                        account["transactionsPerCategory"] = {"error": f"Parsing error: {str(e)}"}
+                else:
+                    account["transactionsPerCategory"] = {"error": "Invalid transaction data"}
+
             # Store accounts in the database
             bank_accounts_collection.update_one(
                 {"userId": user_id},
@@ -190,6 +202,7 @@ def get_connected_accounts():
         return jsonify({"error": f"Request failed: {str(re)}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 
 
@@ -271,6 +284,15 @@ def sync_balances_and_transactions():
                 except Exception as e:
                     updated_accounts.append({"error": str(e)})
 
+        # Parse transactions for each account after fetching all data
+        for account in updated_accounts:
+            transactions = account.get("transactions", [])
+            if isinstance(transactions, list):
+                try:
+                    account["transactionsPerCategory"] = parse_transactions_categories(transactions)
+                except Exception as e:
+                    account["transactionsPerCategory"] = {"error": f"Parsing error: {str(e)}"}
+
         # Update the database with the refreshed balances and transactions
         bank_accounts_collection.update_one(
             {"userId": user_id},
@@ -285,3 +307,21 @@ def sync_balances_and_transactions():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@routes_bp.route("/get-transactions-per-category", methods=["GET"])
+def get_transactions_per_category():
+    user_id = request.args.get("user_id")
+    if not user_id:
+        return jsonify({"error": "User ID is required"}), 400
+
+    stored_accounts = bank_accounts_collection.find_one({"userId": user_id})
+    if not stored_accounts:
+        return jsonify({"error": "No accounts found for this user"}), 404
+
+    transactions_per_category = {}
+    for account in stored_accounts.get("accounts", []):
+        account_map = account.get("transactionsPerCategory", {})
+        for category, count in account_map.items():
+            transactions_per_category[category] = transactions_per_category.get(category, 0) + count
+
+    return jsonify({"transactionsPerCategory": transactions_per_category}), 200

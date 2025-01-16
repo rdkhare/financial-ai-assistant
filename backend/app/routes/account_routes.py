@@ -5,6 +5,7 @@ from requests.exceptions import RequestException
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.helpers.transaction_helpers import parse_transactions_categories, calculate_balance_over_time
 from utils.request_utils import get_session_with_retries
+from utils.plaid_service import create_link_token, exchange_public_token
 
 account_routes_bp = Blueprint("account_routes", __name__)
 
@@ -282,5 +283,36 @@ def sync_balances_and_transactions():
 
     except RequestException as re:
         return jsonify({"error": f"Request failed: {str(re)}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@account_routes_bp.route("/create-link-token", methods=["POST"])
+def create_link_token_route():
+    data = request.json
+    user_id = data.get("user_id")
+    if not user_id:
+        return jsonify({"error": "User ID is required"}), 400
+    try:
+        link_token = create_link_token(user_id)
+        return jsonify(link_token), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@account_routes_bp.route("/exchange-public-token", methods=["POST"])
+def exchange_public_token_route():
+    data = request.json
+    public_token = data.get("public_token")
+    user_id = data.get("user_id")
+    if not public_token or not user_id:
+        return jsonify({"error": "Public token and User ID are required"}), 400
+    try:
+        exchange_response = exchange_public_token(public_token)
+        access_token = exchange_response.get("access_token")
+        users_collection.update_one(
+            {"_id": user_id},
+            {"$set": {"plaid_access_token": access_token}},
+            upsert=True
+        )
+        return jsonify({"message": "Token exchanged successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -60,6 +60,54 @@ export default function Account() {
         }
     };
 
+    const handlePlaidLink = async () => {
+        try {
+            const response = await fetch("http://127.0.0.1:5001/create-link-token", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: user.uid }),
+            });
+
+            const data = await response.json();
+            if (response.ok) {
+                const handler = Plaid.create({
+                    token: data.link_token,
+                    onSuccess: async (public_token) => {
+                        try {
+                            const res = await fetch("http://127.0.0.1:5001/exchange-public-token", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    public_token,
+                                    user_id: user.uid,
+                                }),
+                            });
+
+                            if (!res.ok) {
+                                throw new Error("Failed to exchange public token");
+                            }
+
+                            // Fetch accounts to update the list dynamically
+                            await fetchAccounts();
+                        } catch (err) {
+                            console.error("Error exchanging public token:", err);
+                            alert("Failed to connect account");
+                        }
+                    },
+                    onExit: (error) => {
+                        console.error("Plaid Link error:", error);
+                        alert("Failed to connect account");
+                    },
+                });
+                handler.open();
+            } else {
+                throw new Error(data.error || "Failed to create link token");
+            }
+        } catch (err) {
+            console.error("Error creating link token:", err);
+            alert("Failed to initiate Plaid Link");
+        }
+    };
 
     const handleTellerConnect = () => {
         if (TellerConnect) {
@@ -189,6 +237,17 @@ export default function Account() {
             >
                 {isConnecting ? "Connecting..." : "Connect Bank Account"}
             </button>}
+            {user && (
+                <button
+                    onClick={handlePlaidLink}
+                    className={`mt-8 border-2 border-black bg-black text-white p-3 rounded-md hover:bg-white hover:shadow-lg transition-transform hover:text-black ${
+                        isConnecting ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    disabled={isConnecting}
+                >
+                    {isConnecting ? "Connecting..." : "Connect Bank Account with Plaid"}
+                </button>
+            )}
         </div>
     );
 }

@@ -32,6 +32,10 @@ export default function RootLayout({ children }) {
                     src="https://cdn.teller.io/connect/connect.js"
                     strategy="beforeInteractive"
                 />
+                <Script
+                    src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"
+                    strategy="beforeInteractive"
+                />
                 </>
             </body>
         </html>

@@ -1,48 +1,18 @@
 from flask import Blueprint, jsonify, request
-from utils.db import add_access_token, add_user, db
-from utils.teller_service import fetch_accounts, fetch_transactions
-import requests
-from requests.adapters import HTTPAdapter
+from utils.db import db
+from utils.teller_service import fetch_accounts
 from requests.exceptions import RequestException
-from urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.helpers.transaction_helpers import parse_transactions_categories, calculate_balance_over_time
+from utils.request_utils import get_session_with_retries
 
-routes_bp = Blueprint("routes", __name__)
+account_routes_bp = Blueprint("account_routes", __name__)
 
-# Users collection
-users_collection = db["users"]
 # Bank accounts collection
 bank_accounts_collection = db["bank_accounts"]
+users_collection = db["users"]
 
-# Configure retries for API requests
-def get_session_with_retries():
-    session = requests.Session()
-    retries = Retry(
-        total=5,  # Retry up to 5 times
-        backoff_factor=0.5,  # Exponential backoff
-        status_forcelist=[500, 502, 503, 504],  # Retry on these status codes
-    )
-    adapter = HTTPAdapter(max_retries=retries)
-    session.mount("https://", adapter)
-    return session
-
-@routes_bp.route("/signup", methods=["POST"])
-def signup():
-    try:
-        # Parse JSON request
-        data = request.get_json()
-        user_id = data["user_id"]
-        email = data["email"]
-        name = data.get("name", "Anonymous")  # Default to 'Anonymous' if no name is provided
-
-        # Add user to MongoDB
-        user_data = add_user(user_id, name, email)
-        return jsonify({"status": "success", "user": user_data}), 201
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    
-@routes_bp.route("/accounts", methods=["POST"])
+@account_routes_bp.route("/accounts", methods=["POST"])
 def get_accounts():
     access_token = request.json.get("access_token")
     if not access_token:
@@ -52,25 +22,8 @@ def get_accounts():
         return jsonify(accounts)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
-@routes_bp.route("/store-access-token", methods=["POST"])
-def store_access_token():
-    try:
-        data = request.json
-        access_token = data.get("access_token")
-        user_id = data.get("user_id")  # Retrieve the user's ID from the frontend
 
-        if not access_token or not user_id:
-            return jsonify({"error": "Access token and user ID are required"}), 400
-
-        # Update or insert the user document with the access token
-        add_access_token(user_id, access_token)
-        return jsonify({"message": "Access token stored successfully"}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
-@routes_bp.route("/get-connected-accounts", methods=["POST"])
+@account_routes_bp.route("/get-connected-accounts", methods=["POST"])
 def get_connected_accounts():
     """
     Retrieves connected accounts for a user from the MongoDB database.
@@ -218,10 +171,7 @@ def get_connected_accounts():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-
-
-@routes_bp.route("/sync-balances-and-transactions", methods=["POST"])
+@account_routes_bp.route("/sync-balances-and-transactions", methods=["POST"])
 def sync_balances_and_transactions():
     """
     Syncs the balances and transactions of connected accounts for a user by fetching updated data from the Teller API.
@@ -334,46 +284,3 @@ def sync_balances_and_transactions():
         return jsonify({"error": f"Request failed: {str(re)}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-@routes_bp.route("/get-transactions-per-category", methods=["GET"])
-def get_transactions_per_category():
-    user_id = request.args.get("user_id")
-    if not user_id:
-        return jsonify({"error": "User ID is required"}), 400
-
-    stored_accounts = bank_accounts_collection.find_one({"userId": user_id})
-    if not stored_accounts:
-        return jsonify({"error": "No accounts found for this user"}), 404
-
-    transactions_per_category = {}
-    for account in stored_accounts.get("accounts", []):
-        account_map = account.get("transactionsPerCategory", {})
-        for category, count in account_map.items():
-            transactions_per_category[category] = transactions_per_category.get(category, 0) + count
-
-    return jsonify({"transactionsPerCategory": transactions_per_category}), 200
-
-@routes_bp.route("/get-balance-over-time", methods=["POST"])
-def get_balance_over_time():
-    data = request.json
-    user_id = data.get("user_id")
-    start_date = data.get("start_date")  
-    end_date = data.get("end_date")     
-
-    if not user_id:
-        return jsonify({"error": "User ID is required"}), 400
-
-    stored_accounts = bank_accounts_collection.find_one({"userId": user_id})
-    if not stored_accounts:
-        return jsonify({"error": "No accounts found for this user"}), 404
-
-    # Aggregate all transactions for the user
-    all_transactions = []
-    for account in stored_accounts.get("accounts", []):
-        all_transactions.extend(account.get("transactions", []))
-
-    # Calculate balance over time with date filtering
-    balance_over_time = calculate_balance_over_time(all_transactions, start_date, end_date)
-
-    return jsonify({"balanceOverTime": balance_over_time}), 200

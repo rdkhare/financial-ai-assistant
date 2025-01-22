@@ -1,6 +1,9 @@
 import plaid
 from plaid.api import plaid_api
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
+from plaid.model.transactions_sync_request import TransactionsSyncRequest
+from plaid.model.transactions_refresh_request import TransactionsRefreshRequest
+
 from plaid.model.products import Products
 from plaid.model.country_code import CountryCode
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
@@ -20,16 +23,40 @@ configuration = plaid.Configuration(
 api_client = plaid.ApiClient(configuration)
 client = plaid_api.PlaidApi(api_client)
 
+# Function to create link token with transactions product and webhook
 def create_link_token(user_id):
     request = LinkTokenCreateRequest(
         products=[Products("transactions")],
         client_name="Financial Assistant AI",
         country_codes=[CountryCode("US")],
         language="en",
-        user={"client_user_id": user_id}
+        user={"client_user_id": user_id},
+        webhook="https://yourdomain.com/plaid-webhook",
+        transactions={
+            "days_requested": 90  # Adjust this as per your integration needs
+        }
     )
     response = client.link_token_create(request)
-    print(response)
+    return response.to_dict()
+
+def transactions_sync(access_token, cursor=None):
+    if cursor:
+        request = TransactionsSyncRequest(
+            access_token=access_token,
+            cursor=cursor  # Only include cursor if it's not None
+        )
+    else:
+        request = TransactionsSyncRequest(
+            access_token=access_token
+        )
+    response = client.transactions_sync(request)
+    return response.to_dict()
+
+
+# Wrapper for /transactions/refresh
+def transactions_refresh(access_token):
+    request = TransactionsRefreshRequest(access_token=access_token)
+    response = client.transactions_refresh(request)
     return response.to_dict()
 
 def exchange_public_token(public_token):

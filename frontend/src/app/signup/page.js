@@ -106,7 +106,7 @@ export default function Signup() {
             </button>
             {message && <p className="mt-4 text-red-500">{message}</p>}
             <div className="mt-4">
-                <p>
+                <p className="text-white">
                     Already have an account?{" "}
                     <Link href="/login" className="text-blue-500 hover:underline">
                         Login

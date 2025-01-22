@@ -1,69 +1,60 @@
-// "use client";
+"use client";
 
-// import { useEffect, useState } from "react";
-// import { fetchTransactions } from "../../lib/api";
+import { useEffect, useState } from "react";
+import { useAuth } from "../../context/AuthContext";
 
-// export default function Transactions() {
-//     const [transactions, setTransactions] = useState([]);
-//     const [loading, setLoading] = useState(true);
-//     const [error, setError] = useState("");
+export default function Transactions() {
+    const { user } = useAuth();
+    const [transactions, setTransactions] = useState([]);
+    const [error, setError] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
 
-//     useEffect(() => {
-//         const accessToken = "access-sandbox-249dae0e-6245-446c-83e9-88b9845e0585"; // Replace with a dynamic token
-//         const startDate = "2023-12-01";
-//         const endDate = "2023-12-31";
+    useEffect(() => {
+        fetchTransactions();
+    }, [user]);
 
-//         async function loadTransactions() {
-//             try {
-//                 const data = await fetchTransactions(accessToken, startDate, endDate);
-//                 setTransactions(data);
-//             } catch (err) {
-//                 setError(err.message);
-//             } finally {
-//                 setLoading(false);
-//             }
-//         }
+    const fetchTransactions = async () => {
+        if (user) {
+            try {
+                const response = await fetch("http://127.0.0.1:5001/transactions/sync", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ user_id: user.uid }),
+                });
 
-//         loadTransactions();
-//     }, []);
+                const data = await response.json();
+                if (response.ok) {
+                    setTransactions(data.transactions || []);
+                } else {
+                    setError(data.error || "Failed to fetch transactions");
+                }
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                setIsLoading(false);
+            }
+        }
+    };
 
-//     if (loading) {
-//         return <p>Loading transactions...</p>;
-//     }
-
-//     if (error) {
-//         return <p>Error: {error}</p>;
-//     }
-
-//     return (
-//         <div className="p-4">
-//             <h1 className="text-2xl font-bold mb-4 text-white">Transactions</h1>
-//             <table className="table-auto w-full border-collapse border border-gray-300 bg-white shadow mb-6">
-//                 <thead>
-//                     <tr className="bg-gray-700 text-white">
-//                         <th className="border border-gray-300 p-2">Account</th>
-//                         <th className="border border-gray-300 p-2">Name</th>
-//                         <th className="border border-gray-300 p-2">Type</th>
-//                         <th className="border border-gray-300 p-2">Current Balance</th>
-//                         <th className="border border-gray-300 p-2">Available Balance</th>
-//                     </tr>
-//                 </thead>
-//                 <tbody>
-//                     {transactions.accounts.map((account) => (
-//                         <tr key={account.account_id} className="hover:bg-gray-100">
-//                             <td className="border border-gray-300 p-2 text-black">{account.mask}</td>
-//                             <td className="border border-gray-300 p-2 text-black">{account.name}</td>
-//                             <td className="border border-gray-300 p-2 text-black">{account.type}</td>
-//                             <td className="border border-gray-300 p-2 text-black">
-//                                 ${account.balances.current.toFixed(2)}
-//                             </td>
-//                             <td className="border border-gray-300 p-2 text-black">
-//                                 ${account.balances.available?.toFixed(2) || "N/A"}
-//                             </td>
-//                         </tr>
-//                     ))}
-//                 </tbody>
-//             </table>
-//         </div>
-//     );
-// }
+    return (
+        <div className="p-6 bg-gray-900 text-white">
+            <h1 className="text-2xl font-bold mb-4">Transactions</h1>
+            {isLoading ? (
+                <p>Loading transactions...</p>
+            ) : error ? (
+                <p className="text-red-500">{error}</p>
+            ) : transactions.length > 0 ? (
+                <ul>
+                    {transactions.map((tx, idx) => (
+                        <li key={idx} className="border-b border-gray-700 p-2">
+                            <p>{tx.date} - {tx.name}</p>
+                            <p>${tx.amount.toFixed(2)}</p>
+                        </li>
+                    ))}
+                </ul>
+            ) : (
+                <p>No transactions found.</p>
+            )}
+        </div>
+    );
+}

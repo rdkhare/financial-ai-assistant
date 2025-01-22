@@ -5,7 +5,7 @@ from requests.exceptions import RequestException
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.helpers.transaction_helpers import parse_transactions_categories, calculate_balance_over_time
 from utils.request_utils import get_session_with_retries
-from utils.plaid_service import create_link_token, exchange_public_token
+from utils.plaid_service import create_link_token, exchange_public_token, transactions_sync, transactions_refresh, fetch_accounts as fetch_plaid_accounts
 
 account_routes_bp = Blueprint("account_routes", __name__)
 
@@ -24,6 +24,84 @@ def get_accounts():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+## Plaid API get accounts route
+@account_routes_bp.route("/get-plaid-accounts", methods=["POST"])
+def get_plaid_accounts():
+    try:
+        data = request.json
+        user_id = data.get("user_id")
+        if not user_id:
+            return jsonify({"error": "User ID is required"}), 400
+
+        # Check if accounts already exist in the database
+        stored_accounts = bank_accounts_collection.find_one({"userId": user_id})
+        if stored_accounts:
+            return jsonify({"accounts": stored_accounts["accounts"]}), 200
+
+        user = users_collection.find_one({"_id": user_id})
+        if not user or "plaid_access_token" not in user:
+            return jsonify({"error": "No access token found for this user"}), 404
+
+        access_token = user["plaid_access_token"]
+        accounts = fetch_plaid_accounts(access_token)
+
+        account_infos = []
+        if accounts["accounts"]:
+            for account in accounts["accounts"]:
+                account_info = {
+                    "accountName": account.get("name"),
+                    "accountType": account.get("type"),
+                    "accountNumber": account.get("mask"),
+                    "currency": account.get("balances", {}).get("iso_currency_code"),
+                    "subtype": account.get("subtype"),
+                    "account_id": account.get("account_id"),
+                    "balance": account.get("balances", {}).get("current"),
+                    "transactions": None
+                }
+                account_infos.append(account_info)
+                users_collection.update_one(
+                    {"_id": user_id},
+                    {"$addToSet": {"accountIds": account.get("account_id")}}
+                )
+
+                bank_accounts_collection.update_one(
+                    {"userId": user_id},
+                    {"$set": {"accounts": account_infos}},
+                    upsert=True
+                )
+
+        
+        return jsonify(account_infos), 200
+    except RequestException as re:
+        return jsonify({"error": f"Request failed: {str(re)}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@account_routes_bp.route("/get-transactions", methods=["POST"])
+def get_transactions():
+    try:
+        data = request.json
+        user_id = data.get("user_id")
+        start_date = data.get("start_date") or (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        end_date = data.get("end_date") or datetime.now().strftime("%Y-%m-%d")
+
+        if not user_id:
+            return jsonify({"error": "User ID is required"}), 400
+
+        # Fetch user's access token
+        user = users_collection.find_one({"_id": user_id})
+        if not user or "plaid_access_token" not in user:
+            return jsonify({"error": "No access token found for this user"}), 404
+
+        access_token = user["plaid_access_token"]
+
+        # Fetch transactions using Plaid API
+        transactions = fetch_transactions(access_token, start_date, end_date)
+        return jsonify({"transactions": transactions}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+## Teller API
 @account_routes_bp.route("/get-connected-accounts", methods=["POST"])
 def get_connected_accounts():
     """
@@ -288,8 +366,7 @@ def sync_balances_and_transactions():
 
 @account_routes_bp.route("/create-link-token", methods=["POST"])
 def create_link_token_route():
-    data = request.json
-    user_id = data.get("user_id")
+    user_id = request.json.get("user_id")
     if not user_id:
         return jsonify({"error": "User ID is required"}), 400
     try:
@@ -300,19 +377,50 @@ def create_link_token_route():
 
 @account_routes_bp.route("/exchange-public-token", methods=["POST"])
 def exchange_public_token_route():
-    data = request.json
-    public_token = data.get("public_token")
-    user_id = data.get("user_id")
+    public_token = request.json.get("public_token")
+    user_id = request.json.get("user_id")
     if not public_token or not user_id:
         return jsonify({"error": "Public token and User ID are required"}), 400
     try:
         exchange_response = exchange_public_token(public_token)
         access_token = exchange_response.get("access_token")
+        # Save access_token in the database
         users_collection.update_one(
             {"_id": user_id},
-            {"$set": {"plaid_access_token": access_token}},
+            {"$set": {"plaid_access_token": access_token, "next_cursor": None}},
             upsert=True
         )
         return jsonify({"message": "Token exchanged successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@account_routes_bp.route("/transactions/sync", methods=["POST"])
+def sync_transactions():
+    user_id = request.json.get("user_id")
+    if not user_id:
+        return jsonify({"error": "User ID is required"}), 400
+    try:
+        user = users_collection.find_one({"_id": user_id})
+        if not user or "plaid_access_token" not in user:
+            return jsonify({"error": "No access token found for this user"}), 404
+
+        access_token = user["plaid_access_token"]
+        cursor = user.get("next_cursor", None)
+
+        transactions = []
+        while True:
+            response = transactions_sync(access_token, cursor)
+            transactions.extend(response["added"])
+            cursor = response.get("next_cursor")
+            if not response.get("has_more", False):
+                break
+
+        # Save the latest cursor in the database
+        users_collection.update_one(
+            {"_id": user_id},
+            {"$set": {"next_cursor": cursor}}
+        )
+
+        return jsonify({"transactions": transactions}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

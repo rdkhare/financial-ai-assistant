@@ -62,14 +62,12 @@ This project contains both a frontend (Next.js) and a backend (Flask). Follow th
 ### Notes
 - Ensure both the backend and frontend servers are running simultaneously for the app to work properly.
 - If you encounter any issues, check the terminal logs for errors in either the backend or frontend servers.
-- You will need to have your own Teller Dev account and create a folder in backend/ called certs. In this folder, upload your certificate.pem and private_key.pem.
+- You will need to create and use your own Plaid Dev account
+
 - Create a .env file in backend/ with variables:
     ```bash
-    TELLER_CLIENT_CERT = "path/to/your/teller/cert"
-    TELLER_CLIENT_KEY = "path/to/your/teller/privatekey"
+    PLAID_CLIENT_ID = "path/to/your/plaid/client/id"
+    PLAID_SECRET = "path/to/your/plaid/secretkey"
+    PLAID_ENV = "sandbox"
     MONGO_URI = "mongodb_connectionstring"
-    ```
-- Create a .env.local file in frontend/ with variable:
-    ```bash
-    NEXT_PUBLIC_TELLER_APP_ID="tellerappid"
     ```

@@ -1,6 +1,0 @@
-<script>start("/Users/rdkhare-1/Library/Mobile Documents/.Trash/venv/");</script>
-<script>onHasParentDirectory();</script>
-<script>addRow("bin","bin",1,512,"512 B",1736463674,"1/9/25, 3:01:14 PM");</script>
-<script>addRow("include","include",1,96,"96 B",1735003055,"12/23/24, 5:17:35 PM");</script>
-<script>addRow("lib","lib",1,96,"96 B",1736992232,"1/15/25, 5:50:32 PM");</script>
-<script>addRow("pyvenv.cfg","pyvenv.cfg",0,243,"243 B",1736463657,"1/9/25, 3:00:57 PM");</script>

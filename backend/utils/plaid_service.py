@@ -43,7 +43,7 @@ def transactions_sync(access_token, cursor=None):
     if cursor:
         request = TransactionsSyncRequest(
             access_token=access_token,
-            cursor=cursor  # Only include cursor if it's not None
+            cursor=cursor
         )
     else:
         request = TransactionsSyncRequest(

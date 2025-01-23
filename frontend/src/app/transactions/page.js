@@ -47,7 +47,7 @@ export default function Transactions() {
                 <ul>
                     {transactions.map((tx, idx) => (
                         <li key={idx} className="border-b border-gray-700 p-2">
-                            <p>{tx.date} - {tx.name}</p>
+                            <p>{tx.date} - {tx.personal_finance_category.primary}</p>
                             <p>${tx.amount.toFixed(2)}</p>
                         </li>
                     ))}

@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.helpers.transaction_helpers import parse_transactions_categories, calculate_balance_over_time
 from utils.request_utils import get_session_with_retries
 from utils.plaid_service import create_link_token, exchange_public_token, transactions_sync, transactions_refresh, fetch_accounts as fetch_plaid_accounts
+import datetime
 
 account_routes_bp = Blueprint("account_routes", __name__)
 
@@ -30,21 +31,11 @@ def get_plaid_accounts():
     try:
         data = request.json
         user_id = data.get("user_id")
-        if not user_id:
-            return jsonify({"error": "User ID is required"}), 400
+        access_token = users_collection.find_one({"_id": user_id}).get("plaid_access_token")
+        if not user_id or not access_token:
+            return jsonify({"error": "User ID and Access Token are required"}), 400
 
-        # Check if accounts already exist in the database
-        stored_accounts = bank_accounts_collection.find_one({"userId": user_id})
-        if stored_accounts:
-            return jsonify({"accounts": stored_accounts["accounts"]}), 200
-
-        user = users_collection.find_one({"_id": user_id})
-        if not user or "plaid_access_token" not in user:
-            return jsonify({"error": "No access token found for this user"}), 404
-
-        access_token = user["plaid_access_token"]
         accounts = fetch_plaid_accounts(access_token)
-
         account_infos = []
         if accounts["accounts"]:
             for account in accounts["accounts"]:
@@ -55,25 +46,18 @@ def get_plaid_accounts():
                     "currency": account.get("balances", {}).get("iso_currency_code"),
                     "subtype": account.get("subtype"),
                     "account_id": account.get("account_id"),
+                    "plaid_access_token": access_token,
                     "balance": account.get("balances", {}).get("current"),
-                    "transactions": None
                 }
                 account_infos.append(account_info)
-                users_collection.update_one(
-                    {"_id": user_id},
-                    {"$addToSet": {"accountIds": account.get("account_id")}}
-                )
 
-                bank_accounts_collection.update_one(
-                    {"userId": user_id},
-                    {"$set": {"accounts": account_infos}},
-                    upsert=True
-                )
-
-        
+            # Update user's account references
+            bank_accounts_collection.update_one(
+                {"userId": user_id},
+                {"$set": {"accounts": account_infos}},
+                upsert=True
+            )
         return jsonify(account_infos), 200
-    except RequestException as re:
-        return jsonify({"error": f"Request failed: {str(re)}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -100,6 +84,46 @@ def get_transactions():
         return jsonify({"transactions": transactions}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# Plaid webhook for syncing transaction updates
+@account_routes_bp.route("/plaid-webhook", methods=["POST"])
+def plaid_webhook():
+    try:
+        data = request.json
+        webhook_type = data.get("webhook_type")
+        webhook_code = data.get("webhook_code")
+        user_id = data.get("item_id")  # Map Plaid `item_id` to user ID in your database
+
+        if webhook_type == "TRANSACTIONS" and webhook_code == "SYNC_UPDATES_AVAILABLE":
+            # Trigger transactions sync for the affected user
+            user = users_collection.find_one({"plaid_item_id": user_id})
+            if not user:
+                return jsonify({"error": "User not found"}), 404
+
+            access_token = user["plaid_access_token"]
+            cursor = user.get("next_cursor", None)
+
+            transactions = []
+            while True:
+                response = transactions_sync(access_token, cursor)
+                transactions.extend(response["added"])
+                cursor = response.get("next_cursor")
+                if not response.get("has_more", False):
+                    break
+
+            # Save transactions and update the cursor
+            for txn in transactions:
+                txn["user_id"] = user["_id"]
+                db["transactions"].update_one(
+                    {"transaction_id": txn["transaction_id"]}, {"$set": txn}, upsert=True
+                )
+
+            users_collection.update_one({"_id": user["_id"]}, {"$set": {"next_cursor": cursor}})
+        
+        return jsonify({"message": "Webhook processed successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 ## Teller API
 @account_routes_bp.route("/get-connected-accounts", methods=["POST"])
@@ -410,17 +434,39 @@ def sync_transactions():
         transactions = []
         while True:
             response = transactions_sync(access_token, cursor)
-            transactions.extend(response["added"])
+
+            # Process each transaction to ensure JSON serializability
+            for txn in response["added"]:
+                txn = clean_transaction(txn)  
+                transactions.append(txn)
+
             cursor = response.get("next_cursor")
             if not response.get("has_more", False):
                 break
 
-        # Save the latest cursor in the database
-        users_collection.update_one(
-            {"_id": user_id},
-            {"$set": {"next_cursor": cursor}}
-        )
+        # Save transactions to MongoDB
+        for txn in transactions:
+            txn["user_id"] = user["_id"]
+            db["transactions"].update_one(
+                {"transaction_id": txn["transaction_id"]}, {"$set": txn}, upsert=True
+            )
 
+        # Update user's cursor
+        users_collection.update_one({"_id": user["_id"]}, {"$set": {"next_cursor": cursor}})
         return jsonify({"transactions": transactions}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+from datetime import date, datetime
+
+def clean_transaction(transaction):
+    for key, value in transaction.items():
+        if isinstance(value, (datetime, date)):
+            transaction[key] = value.isoformat()  # Convert date/datetime to ISO 8601 string
+        elif isinstance(value, list):  # Handle nested lists
+            transaction[key] = [clean_transaction(item) if isinstance(item, dict) else item for item in value]
+        elif isinstance(value, dict):  # Handle nested dictionaries
+            transaction[key] = clean_transaction(value)
+    return transaction
+
+

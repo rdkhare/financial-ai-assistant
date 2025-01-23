@@ -23,7 +23,6 @@ configuration = plaid.Configuration(
 api_client = plaid.ApiClient(configuration)
 client = plaid_api.PlaidApi(api_client)
 
-# Function to create link token with transactions product and webhook
 def create_link_token(user_id):
     request = LinkTokenCreateRequest(
         products=[Products("transactions")],
@@ -32,31 +31,8 @@ def create_link_token(user_id):
         language="en",
         user={"client_user_id": user_id},
         webhook="https://yourdomain.com/plaid-webhook",
-        transactions={
-            "days_requested": 90  # Adjust this as per your integration needs
-        }
     )
     response = client.link_token_create(request)
-    return response.to_dict()
-
-def transactions_sync(access_token, cursor=None):
-    if cursor:
-        request = TransactionsSyncRequest(
-            access_token=access_token,
-            cursor=cursor
-        )
-    else:
-        request = TransactionsSyncRequest(
-            access_token=access_token
-        )
-    response = client.transactions_sync(request)
-    return response.to_dict()
-
-
-# Wrapper for /transactions/refresh
-def transactions_refresh(access_token):
-    request = TransactionsRefreshRequest(access_token=access_token)
-    response = client.transactions_refresh(request)
     return response.to_dict()
 
 def exchange_public_token(public_token):
@@ -68,12 +44,13 @@ def fetch_accounts(access_token):
     request = AccountsGetRequest(access_token=access_token)
     response = client.accounts_get(request)
     return response.to_dict()
-    
-def fetch_transactions(access_token, start_date, end_date):
-    request = TransactionsGetRequest(
-        access_token=access_token,
-        start_date=start_date,
-        end_date=end_date
-    )
-    response = client.transactions_get(request)
+
+def transactions_sync(access_token, cursor=None):
+    request = TransactionsSyncRequest(access_token=access_token, cursor=cursor) if cursor else TransactionsSyncRequest(access_token=access_token)
+    response = client.transactions_sync(request)
+    return response.to_dict()
+
+def transactions_refresh(access_token):
+    request = TransactionsRefreshRequest(access_token=access_token)
+    response = client.transactions_refresh(request)
     return response.to_dict()

@@ -33,11 +33,18 @@ def add_user(user_id, name, email):
     }
     users_collection.insert_one(user_data)
     return user_data
-def add_access_token(user_id, access_token):
-    # Update or insert the user document with the access token
+
+def add_plaid_access_token(user_id, access_token):
     users_collection.update_one(
         {"_id": user_id},
-        {"$set": {"teller_access_token": access_token}},
+        {"$addToSet": {"plaid_access_tokens": {"token": access_token, "created_at": datetime.datetime.utcnow()}}},
+        upsert=True
+    )
+
+def add_account(user_id, account_info):
+    bank_accounts_collection.update_one(
+        {"userId": user_id},
+        {"$addToSet": {"accounts": account_info}},
         upsert=True
     )
 
